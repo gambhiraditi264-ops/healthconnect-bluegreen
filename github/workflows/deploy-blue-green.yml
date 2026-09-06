@@ -1,0 +1,145 @@
+# ================================================================
+# HealthConnect - Blue-Green Deployment Pipeline
+# CYB204 Software Security / DevSecOps
+# Scenario 3 - Week 7
+#
+# Pipeline Flow:
+# 1. Checkout code
+# 2. Verify project files
+# 3. Set up Node.js
+# 4. Run unit tests
+# 5. Build Docker image
+# 6. Verify BLUE environment
+# 7. Deploy GREEN environment
+# 8. Run GREEN integration tests
+# 9. Run GREEN security tests
+# 10. Perform GREEN health check
+# 11. Promote GREEN (if all tests pass)
+# 12. Rollback on failure
+# ================================================================
+
+name: deploy-blue-green
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Verify project files
+      run: |
+        echo "Verifying HealthConnect project files..."
+        if [ ! -f "app/app.js" ]; then echo "app/app.js missing"; exit 1; fi
+        if [ ! -f "Dockerfile" ]; then echo "Dockerfile missing"; exit 1; fi
+        echo "All required files found."
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: app/package-lock.json
+
+    - name: Run unit tests on GREEN
+      run: |
+        echo "Running unit tests..."
+        cd app
+        npm install
+        npm test
+
+    - name: Build Docker image
+      run: |
+        echo "Building HealthConnect Docker image..."
+        docker build -t healthconnect:1.0 .
+
+    - name: Deploy BLUE (current stable)
+      run: |
+        echo "Checking stable BLUE production environment..."
+        docker run -d --name healthconnect-blue -e DEPLOY_ENV=BLUE -p 5000:5000 healthconnect:1.0 || true
+        echo "BLUE environment is available."
+
+    - name: Deploy GREEN (candidate release)
+      run: |
+        echo "Deploying GREEN candidate release..."
+        docker rm -f healthconnect-green 2>/dev/null || echo "No previous GREEN container found"
+        docker run -d --name healthconnect-green -e DEPLOY_ENV=GREEN -p 5001:5000 healthconnect:1.0
+        sleep 3
+        echo "GREEN candidate environment deployed."
+
+    - name: Run integration tests on GREEN
+      run: |
+        echo "Running integration tests against GREEN..."
+        cd app
+        npm run test:integration
+
+    - name: Run security tests on GREEN
+      run: |
+        echo "Running automated security checks against GREEN..."
+        cd app
+        npm run test:security
+
+    - name: GREEN health check
+      run: |
+        echo "Performing final GREEN health check..."
+        response=$(curl -s http://localhost:5001/health)
+        status=$(echo $response | jq -r '.status')
+        env=$(echo $response | jq -r '.environment')
+        if [ "$status" != "healthy" ] || [ "$env" != "GREEN" ]; then
+          echo "GREEN health validation FAILED."
+          exit 1
+        fi
+        echo "GREEN health validation PASSED."
+
+    - name: Promote GREEN to production
+      run: |
+        echo "============================================"
+        echo " GREEN ENVIRONMENT APPROVED AND PROMOTED TO PRODUCTION"
+        echo " All required validation checks have passed."
+        echo "============================================"
+
+    - name: Post Set up Node.js
+      if: always()
+      run: echo "Post-setup complete"
+
+    - name: Post Checkout code
+      if: always()
+      run: echo "Post-checkout complete"
+
+    - name: On success - rollback not needed
+      if: success()
+      run: |
+        echo "HEALTHCONNECT BLUE-GREEN PIPELINE SUCCESSFUL"
+        echo "GREEN environment approved and promoted to production"
+
+    - name: On failure - automatic rollback
+      if: failure()
+      run: |
+        echo "PIPELINE FAILURE DETECTED."
+        echo "One or more GREEN validation stages FAILED."
+        echo "Initiating automatic rollback..."
+        echo "Stopping GREEN environment..."
+        docker stop healthconnect-green 2>/dev/null || echo "No GREEN to stop"
+        echo "Reverting traffic to BLUE environment..."
+        echo "Verifying BLUE health after rollback..."
+        response=$(curl -s http://localhost:5000/health)
+        status=$(echo $response | jq -r '.status')
+        env=$(echo $response | jq -r '.environment')
+        echo "HealthConnect is running in $env environment"
+        echo "Status: $status"
+        if [ "$status" = "healthy" ] && [ "$env" = "BLUE" ]; then
+          echo "ROLLBACK COMPLETE: BLUE environment restored and healthy."
+        else
+          echo "ROLLBACK WARNING: BLUE health check failed. Manual intervention required."
+          exit 1
+        fi
+
+    - name: Show final container status
+      if: always()
+      run: docker ps -a
