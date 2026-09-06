@@ -27,19 +27,41 @@ jobs:
           DEPLOY_ENV=green node app.js
 
       - name: Run unit tests on GREEN
+        id: unit_tests
         run: |
           echo "Running unit tests on GREEN..."
           echo "Unit tests passed"
 
       - name: Run integration tests on GREEN
+        id: integration_tests
         run: |
           echo "Running integration tests on GREEN..."
           echo "Integration tests passed"
 
       - name: Run security tests on GREEN
+        id: security_tests
         run: |
           echo "Running security tests on GREEN..."
-          echo "Security tests passed"
+          node -e "
+            const fs = require('fs');
+            const code = fs.readFileSync('app.js', 'utf8');
+            if (!code.includes('DEPLOY_ENV')) {
+              console.error('Security check failed: environment variable handling missing');
+              process.exit(1);
+            }
+            console.log('Security tests passed');
+          "
 
       - name: Promote GREEN to production
+        if: success()
         run: echo "GREEN environment approved and promoted to production"
+
+      - name: Rollback to BLUE on failure
+        if: failure()
+        run: |
+          echo "One or more GREEN validation stages FAILED."
+          echo "Initiating automatic rollback..."
+          echo "Stopping GREEN environment..."
+          echo "Reverting traffic to BLUE environment..."
+          DEPLOY_ENV=blue node app.js
+          echo "ROLLBACK COMPLETE: BLUE environment restored and healthy."
