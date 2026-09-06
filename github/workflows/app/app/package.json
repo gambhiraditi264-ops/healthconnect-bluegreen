@@ -1,0 +1,17 @@
+{
+  "name": "healthconnect",
+  "version": "1.0.0",
+  "description": "HealthConnect Patient Portal - Blue-Green Deployment Demo",
+  "main": "app.js",
+  "scripts": {
+    "test": "node tests/test_unit.js",
+    "test:integration": "node tests/test_integration.js",
+    "test:security": "node tests/test_security.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "supertest": "^6.3.3"
+  }
+}
